@@ -1,3 +1,11 @@
+import {
+  detectClaudeMarkers,
+  extractProviderName,
+  isValidHttpUrl
+} from './importConfigUtils'
+
+export { extractProviderName }
+
 /** 从 Codex config.toml 与 auth.json 解析出的导入参数 */
 export interface ParsedCodexConfig {
   baseUrl: string
@@ -46,7 +54,7 @@ export function parseCodexConfigToml(content: string): {
   }
 
   const baseUrl = baseUrlMatch[1].trim()
-  if (!/^https?:\/\/.+/.test(baseUrl)) {
+  if (!isValidHttpUrl(baseUrl)) {
     errors.push({ field: 'configToml', message: 'base_url 必须是有效的 HTTP(S) 地址' })
     return { errors }
   }
@@ -76,7 +84,15 @@ export function parseCodexAuthJson(content: string): {
       return { errors }
     }
 
-    const apiKey = (parsed as Record<string, unknown>).OPENAI_API_KEY
+    const record = parsed as Record<string, unknown>
+
+    // auth.json 不应包含 Claude Code 的 env 结构
+    if (record.env && typeof record.env === 'object') {
+      errors.push({ field: 'authJson', message: '检测到 Claude Code settings.json，请切换到 Claude Code 标签页' })
+      return { errors }
+    }
+
+    const apiKey = record.OPENAI_API_KEY
     if (typeof apiKey !== 'string' || !apiKey.trim()) {
       errors.push({ field: 'authJson', message: 'auth.json 中缺少有效的 OPENAI_API_KEY' })
       return { errors }
@@ -91,11 +107,27 @@ export function parseCodexAuthJson(content: string): {
 
 /**
  * 合并校验 config.toml 与 auth.json，全部通过时返回导入所需参数
+ * - 拒绝 Claude Code 配置混用
  */
 export function validateAndParseCodexConfig(
   configToml: string,
   authJson: string
 ): { ok: true; data: ParsedCodexConfig } | { ok: false; errors: CodexConfigValidationError[] } {
+  const combined = `${configToml}\n${authJson}`
+
+  // Codex 标签页下不允许粘贴 Claude Code 配置
+  if (detectClaudeMarkers(combined)) {
+    return {
+      ok: false,
+      errors: [
+        {
+          field: detectClaudeMarkers(configToml) ? 'configToml' : 'authJson',
+          message: '检测到 Claude Code 配置，请切换到 Claude Code 标签页'
+        }
+      ]
+    }
+  }
+
   const tomlResult = parseCodexConfigToml(configToml)
   const authResult = parseCodexAuthJson(authJson)
   const errors = [...tomlResult.errors, ...authResult.errors]
@@ -111,11 +143,4 @@ export function validateAndParseCodexConfig(
       apiKey: authResult.apiKey
     }
   }
-}
-
-/**
- * 从 base_url 提取 hostname 作为 CC Switch Provider 显示名称
- */
-export function extractProviderName(baseUrl: string): string {
-  return new URL(baseUrl).hostname
 }

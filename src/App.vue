@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { validateAndParseClaudeConfig, type ClaudeConfigValidationError } from './utils/claudeConfigParser'
 import {
   extractProviderName,
   validateAndParseCodexConfig,
   type CodexConfigValidationError
 } from './utils/codexConfigParser'
 import { executeCcsImport } from './utils/executeCcsImport'
+
+type ImportTab = 'codex' | 'claude'
 
 const CONFIG_TOML_PLACEHOLDER = `model_provider = "OpenAI"
 model = "gpt-5.4"
@@ -27,40 +30,86 @@ const AUTH_JSON_PLACEHOLDER = `{
   "OPENAI_API_KEY": "sk-your-api-key"
 }`
 
+const CLAUDE_SETTINGS_PLACEHOLDER = `{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://example.com",
+    "ANTHROPIC_AUTH_TOKEN": "sk-your-api-key",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "CLAUDE_CODE_ATTRIBUTION_HEADER": "0"
+  }
+}`
+
+const activeTab = ref<ImportTab>('codex')
 const configToml = ref('')
 const authJson = ref('')
-const validationErrors = ref<CodexConfigValidationError[]>([])
+const claudeSettingsJson = ref('')
+const codexErrors = ref<CodexConfigValidationError[]>([])
+const claudeErrors = ref<ClaudeConfigValidationError[]>([])
 const globalMessage = ref('')
 
-/** 按字段聚合校验错误，便于在对应输入框下方展示 */
-const errorsByField = computed(() => ({
-  configToml: validationErrors.value.filter((item) => item.field === 'configToml'),
-  authJson: validationErrors.value.filter((item) => item.field === 'authJson')
+const tabs: { id: ImportTab; label: string }[] = [
+  { id: 'codex', label: 'Codex' },
+  { id: 'claude', label: 'Claude Code' }
+]
+
+/** Codex 字段级校验错误 */
+const codexErrorsByField = computed(() => ({
+  configToml: codexErrors.value.filter((item) => item.field === 'configToml'),
+  authJson: codexErrors.value.filter((item) => item.field === 'authJson')
 }))
 
 /**
+ * 切换标签页时清空错误提示，避免跨 Tab 残留状态
+ */
+const switchTab = (tab: ImportTab) => {
+  activeTab.value = tab
+  codexErrors.value = []
+  claudeErrors.value = []
+  globalMessage.value = ''
+}
+
+/**
  * 一键导入 CCS
- * - 先校验 config.toml 与 auth.json 格式
- * - 校验通过后以 openai/codex 配置唤起 CC Switch 深链
+ * - Codex：校验 config.toml + auth.json，platform=openai
+ * - Claude Code：校验 settings.json（仅 JSON），platform=anthropic
  */
 const handleImport = () => {
-  validationErrors.value = []
+  codexErrors.value = []
+  claudeErrors.value = []
   globalMessage.value = ''
 
-  const result = validateAndParseCodexConfig(configToml.value, authJson.value)
+  if (activeTab.value === 'codex') {
+    const result = validateAndParseCodexConfig(configToml.value, authJson.value)
+    if (!result.ok) {
+      codexErrors.value = result.errors
+      globalMessage.value = '请先修正配置格式后再导入'
+      return
+    }
+
+    executeCcsImport({
+      baseUrl: result.data.baseUrl,
+      apiKey: result.data.apiKey,
+      platform: 'openai',
+      providerName: extractProviderName(result.data.baseUrl),
+      onError: (message) => {
+        globalMessage.value = message
+      }
+    })
+    return
+  }
+
+  const result = validateAndParseClaudeConfig(claudeSettingsJson.value)
   if (!result.ok) {
-    validationErrors.value = result.errors
+    claudeErrors.value = result.errors
     globalMessage.value = '请先修正配置格式后再导入'
     return
   }
 
-  const providerName = extractProviderName(result.data.baseUrl)
-
   executeCcsImport({
     baseUrl: result.data.baseUrl,
     apiKey: result.data.apiKey,
-    platform: 'openai',
-    providerName,
+    platform: 'anthropic',
+    providerName: extractProviderName(result.data.baseUrl),
     onError: (message) => {
       globalMessage.value = message
     }
@@ -72,54 +121,94 @@ const handleImport = () => {
   <div class="page">
     <header class="page-header">
       <h1>一键导入 CCS</h1>
-      <p>粘贴配置信息，校验通过后一键导入到 CC Switch。</p>
+      <p>粘贴 Codex 或 Claude Code 配置，校验通过后一键导入到 CC Switch。</p>
     </header>
 
     <div class="layout">
       <section class="panel">
-        <h2 class="panel-title">配置内容</h2>
-
-        <div class="field">
-          <label for="config-toml">config.toml</label>
-          <textarea
-            id="config-toml"
-            v-model="configToml"
-            :class="{ 'is-error': errorsByField.configToml.length > 0 }"
-            :placeholder="CONFIG_TOML_PLACEHOLDER"
-            spellcheck="false"
-          />
-          <p
-            v-for="error in errorsByField.configToml"
-            :key="error.message"
-            class="field-error"
+        <div class="tab-bar" role="tablist">
+          <button
+            v-for="tab in tabs"
+            :key="tab.id"
+            type="button"
+            role="tab"
+            class="tab-btn"
+            :class="{ 'is-active': activeTab === tab.id }"
+            :aria-selected="activeTab === tab.id"
+            @click="switchTab(tab.id)"
           >
-            {{ error.message }}
-          </p>
+            {{ tab.label }}
+          </button>
         </div>
 
-        <div class="field">
-          <label for="auth-json">auth.json</label>
-          <textarea
-            id="auth-json"
-            v-model="authJson"
-            :class="{ 'is-error': errorsByField.authJson.length > 0 }"
-            :placeholder="AUTH_JSON_PLACEHOLDER"
-            spellcheck="false"
-          />
-          <p
-            v-for="error in errorsByField.authJson"
-            :key="error.message"
-            class="field-error"
-          >
-            {{ error.message }}
-          </p>
+        <!-- Codex：config.toml + auth.json -->
+        <div v-if="activeTab === 'codex'" class="tab-panel">
+          <div class="field">
+            <label for="config-toml">config.toml</label>
+            <textarea
+              id="config-toml"
+              v-model="configToml"
+              :class="{ 'is-error': codexErrorsByField.configToml.length > 0 }"
+              :placeholder="CONFIG_TOML_PLACEHOLDER"
+              spellcheck="false"
+            />
+            <p
+              v-for="error in codexErrorsByField.configToml"
+              :key="error.message"
+              class="field-error"
+            >
+              {{ error.message }}
+            </p>
+          </div>
+
+          <div class="field">
+            <label for="auth-json">auth.json</label>
+            <textarea
+              id="auth-json"
+              v-model="authJson"
+              :class="{ 'is-error': codexErrorsByField.authJson.length > 0 }"
+              :placeholder="AUTH_JSON_PLACEHOLDER"
+              spellcheck="false"
+            />
+            <p
+              v-for="error in codexErrorsByField.authJson"
+              :key="error.message"
+              class="field-error"
+            >
+              {{ error.message }}
+            </p>
+          </div>
+        </div>
+
+        <!-- Claude Code：仅支持 settings.json -->
+        <div v-else class="tab-panel">
+          <div class="field">
+            <label for="claude-settings-json">settings.json</label>
+            <p class="field-hint">粘贴 ~/.claude/settings.json 内容（仅支持 JSON 格式）</p>
+            <textarea
+              id="claude-settings-json"
+              v-model="claudeSettingsJson"
+              class="textarea-large"
+              :class="{ 'is-error': claudeErrors.length > 0 }"
+              :placeholder="CLAUDE_SETTINGS_PLACEHOLDER"
+              spellcheck="false"
+            />
+            <p
+              v-for="error in claudeErrors"
+              :key="error.message"
+              class="field-error"
+            >
+              {{ error.message }}
+            </p>
+          </div>
         </div>
       </section>
 
       <aside class="panel action-panel">
         <h2>导入到 CC Switch</h2>
         <p>
-          请确保本机已安装 CC Switch
+          请确保本机已安装 CC Switch。当前标签：
+          <strong>{{ activeTab === 'codex' ? 'Codex' : 'Claude Code' }}</strong>
         </p>
 
         <button

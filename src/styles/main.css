@@ -67,6 +67,52 @@ body {
   font-weight: 600;
 }
 
+.tab-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding: 4px;
+  background: #f3f4f6;
+  border-radius: 12px;
+}
+
+.tab-btn {
+  flex: 1;
+  min-height: 40px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #6b7280;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.tab-btn.is-active {
+  background: #fff;
+  color: #4f46e5;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+
+.tab-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.field-hint {
+  margin: 0;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.textarea-large {
+  min-height: 320px;
+}
+
 .field {
   display: flex;
   flex-direction: column;
