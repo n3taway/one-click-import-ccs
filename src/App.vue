@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { validateAndParseClaudeConfig, type ClaudeConfigValidationError } from './utils/claudeConfigParser'
 import {
   extractProviderName,
   validateAndParseCodexConfig,
   type CodexConfigValidationError
 } from './utils/codexConfigParser'
-import { executeCcsImport } from './utils/executeCcsImport'
+import { buildCcsImportDeeplink, openCcSwitchDeeplink } from './utils/executeCcsImport'
+import { buildShareUrl, getDeeplinkFromSearch, hasDeeplinkParam } from './utils/shareDeeplink'
 
 type ImportTab = 'codex' | 'claude'
+type PageMode = 'generator' | 'landing-valid' | 'landing-invalid'
 
 const CONFIG_TOML_PLACEHOLDER = `model_provider = "OpenAI"
 model = "gpt-5.4"
@@ -46,6 +48,10 @@ const claudeSettingsJson = ref('')
 const codexErrors = ref<CodexConfigValidationError[]>([])
 const claudeErrors = ref<ClaudeConfigValidationError[]>([])
 const globalMessage = ref('')
+const shareUrl = ref('')
+const copyHint = ref('')
+const pageMode = ref<PageMode>('generator')
+const landingDeeplink = ref<string | null>(null)
 
 const tabs: { id: ImportTab; label: string }[] = [
   { id: 'codex', label: 'Codex' },
@@ -59,69 +65,182 @@ const codexErrorsByField = computed(() => ({
 }))
 
 /**
- * 切换标签页时清空错误提示，避免跨 Tab 残留状态
+ * 根据 URL 中的 deeplink 参数决定页面模式
+ */
+onMounted(() => {
+  if (!hasDeeplinkParam()) {
+    pageMode.value = 'generator'
+    return
+  }
+
+  const deeplink = getDeeplinkFromSearch()
+  if (deeplink) {
+    landingDeeplink.value = deeplink
+    pageMode.value = 'landing-valid'
+    return
+  }
+
+  pageMode.value = 'landing-invalid'
+})
+
+/**
+ * 切换标签页时清空错误与已生成的分享链接
  */
 const switchTab = (tab: ImportTab) => {
   activeTab.value = tab
   codexErrors.value = []
   claudeErrors.value = []
   globalMessage.value = ''
+  shareUrl.value = ''
+  copyHint.value = ''
 }
 
 /**
- * 一键导入 CCS
- * - Codex：校验 config.toml + auth.json，platform=openai
- * - Claude Code：校验 settings.json（仅 JSON），platform=anthropic
+ * 写入剪贴板并展示复制反馈
  */
-const handleImport = () => {
-  codexErrors.value = []
-  claudeErrors.value = []
-  globalMessage.value = ''
+const copyShareUrl = async (url: string) => {
+  try {
+    await navigator.clipboard.writeText(url)
+    copyHint.value = '已复制'
+    setTimeout(() => {
+      copyHint.value = ''
+    }, 2000)
+  } catch {
+    copyHint.value = '复制失败，请手动复制'
+  }
+}
 
+/**
+ * 校验配置并构建 ccswitch:// 深链
+ */
+const buildDeeplinkFromForm = (): { ok: true; deeplink: string } | { ok: false } => {
   if (activeTab.value === 'codex') {
     const result = validateAndParseCodexConfig(configToml.value, authJson.value)
     if (!result.ok) {
       codexErrors.value = result.errors
-      globalMessage.value = '请先修正配置格式后再导入'
-      return
+      globalMessage.value = '请先修正配置格式后再生成链接'
+      return { ok: false }
     }
 
-    executeCcsImport({
-      baseUrl: result.data.baseUrl,
-      apiKey: result.data.apiKey,
-      platform: 'openai',
-      providerName: extractProviderName(result.data.baseUrl),
-      onError: (message) => {
-        globalMessage.value = message
-      }
-    })
-    return
+    return {
+      ok: true,
+      deeplink: buildCcsImportDeeplink({
+        baseUrl: result.data.baseUrl,
+        apiKey: result.data.apiKey,
+        platform: 'openai',
+        providerName: extractProviderName(result.data.baseUrl)
+      })
+    }
   }
 
   const result = validateAndParseClaudeConfig(claudeSettingsJson.value)
   if (!result.ok) {
     claudeErrors.value = result.errors
-    globalMessage.value = '请先修正配置格式后再导入'
+    globalMessage.value = '请先修正配置格式后再生成链接'
+    return { ok: false }
+  }
+
+  return {
+    ok: true,
+    deeplink: buildCcsImportDeeplink({
+      baseUrl: result.data.baseUrl,
+      apiKey: result.data.apiKey,
+      platform: 'anthropic',
+      providerName: extractProviderName(result.data.baseUrl)
+    })
+  }
+}
+
+/**
+ * 生成带 deeplink 参数的分享 URL，并默认写入剪贴板
+ */
+const handleGenerateLink = async () => {
+  codexErrors.value = []
+  claudeErrors.value = []
+  globalMessage.value = ''
+  shareUrl.value = ''
+  copyHint.value = ''
+
+  const built = buildDeeplinkFromForm()
+  if (!built.ok) {
     return
   }
 
-  executeCcsImport({
-    baseUrl: result.data.baseUrl,
-    apiKey: result.data.apiKey,
-    platform: 'anthropic',
-    providerName: extractProviderName(result.data.baseUrl),
-    onError: (message) => {
-      globalMessage.value = message
-    }
+  const url = buildShareUrl(built.deeplink)
+  shareUrl.value = url
+  await copyShareUrl(url)
+}
+
+/**
+ * Generator 页：校验配置后直接唤起 CC Switch，无需生成分享链接
+ */
+const handleDirectImport = () => {
+  codexErrors.value = []
+  claudeErrors.value = []
+  globalMessage.value = ''
+
+  const built = buildDeeplinkFromForm()
+  if (!built.ok) {
+    return
+  }
+
+  openCcSwitchDeeplink(built.deeplink, (message) => {
+    globalMessage.value = message
+  })
+}
+
+/**
+ * Landing 页：解码后的 ccswitch:// 深链唤起 CC Switch
+ */
+const handleLandingImport = () => {
+  globalMessage.value = ''
+
+  if (!landingDeeplink.value) {
+    return
+  }
+
+  openCcSwitchDeeplink(landingDeeplink.value, (message) => {
+    globalMessage.value = message
   })
 }
 </script>
 
 <template>
-  <div class="page">
+  <!-- Landing：有效 deeplink，仅展示居中导入按钮 -->
+  <div v-if="pageMode === 'landing-valid'" class="landing-page">
+    <button
+      class="import-btn import-btn-large"
+      type="button"
+      @click="handleLandingImport"
+    >
+      一键导入
+    </button>
+
+    <div
+      v-if="globalMessage"
+      class="alert alert-error landing-alert"
+    >
+      {{ globalMessage }}
+    </div>
+
+    <footer class="page-footer landing-footer">
+      Powered by HAI
+    </footer>
+  </div>
+
+  <!-- Landing：deeplink 无效 -->
+  <div v-else-if="pageMode === 'landing-invalid'" class="landing-page">
+    <p class="landing-error">链接无效或已损坏</p>
+    <footer class="page-footer landing-footer">
+      Powered by HAI
+    </footer>
+  </div>
+
+  <!-- Generator：配置表单 + 生成分享链接 -->
+  <div v-else class="page">
     <header class="page-header">
       <h1>一键导入 CCS</h1>
-      <p>粘贴 Codex 或 Claude Code 配置，校验通过后一键导入到 CC Switch。</p>
+      <p>粘贴 Codex 或 Claude Code 配置，校验通过后生成分享链接。链接内含 API Key，请勿公开传播。</p>
     </header>
 
     <div class="layout">
@@ -141,7 +260,6 @@ const handleImport = () => {
           </button>
         </div>
 
-        <!-- Codex：config.toml + auth.json -->
         <div v-if="activeTab === 'codex'" class="tab-panel">
           <div class="field">
             <label for="config-toml">config.toml</label>
@@ -180,7 +298,6 @@ const handleImport = () => {
           </div>
         </div>
 
-        <!-- Claude Code：仅支持 settings.json -->
         <div v-else class="tab-panel">
           <div class="field">
             <label for="claude-settings-json">settings.json</label>
@@ -205,19 +322,46 @@ const handleImport = () => {
       </section>
 
       <aside class="panel action-panel">
-        <h2>导入到 CC Switch</h2>
+        <h2>生成分享链接</h2>
         <p>
-          请确保本机已安装 CC Switch。当前标签：
+          当前标签：
           <strong>{{ activeTab === 'codex' ? 'Codex' : 'Claude Code' }}</strong>
         </p>
 
         <button
           class="import-btn"
           type="button"
-          @click="handleImport"
+          @click="handleGenerateLink"
+        >
+          生成深度链接
+        </button>
+
+        <button
+          class="import-btn import-btn-secondary"
+          type="button"
+          @click="handleDirectImport"
         >
           一键导入
         </button>
+
+        <div v-if="shareUrl" class="share-link-block">
+          <div class="share-link-row">
+            <input
+              class="share-link-text"
+              type="text"
+              readonly
+              :value="shareUrl"
+            />
+            <button
+              class="copy-btn"
+              type="button"
+              @click="copyShareUrl(shareUrl)"
+            >
+              复制链接
+            </button>
+          </div>
+          <p v-if="copyHint" class="copy-hint">{{ copyHint }}</p>
+        </div>
 
         <div
           v-if="globalMessage"

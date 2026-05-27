@@ -19,7 +19,7 @@ export const DEFAULT_CCS_USAGE_SCRIPT = `({
   }
 })`
 
-/** executeCcsImport 的输入参数 */
+/** CC Switch 导入参数 */
 export interface ExecuteCcsImportOptions {
   /** 网关 base URL */
   baseUrl: string
@@ -38,22 +38,19 @@ export interface ExecuteCcsImportOptions {
 }
 
 /**
- * 通过 ccswitch:// 深链将 Provider 导入 CC Switch
- * - 构建 deeplink 并以 _self 打开，触发本地协议处理器
- * - 100ms 后若页面仍聚焦，视为未安装 CC Switch 并触发 onError
+ * 根据配置构建 ccswitch:// 导入深链字符串
  */
-export function executeCcsImport(options: ExecuteCcsImportOptions): void {
+export function buildCcsImportDeeplink(options: Omit<ExecuteCcsImportOptions, 'onError'>): string {
   const {
     baseUrl,
     apiKey,
     platform = 'anthropic',
     clientType = 'claude',
     providerName = 'sub2api',
-    usageScript = DEFAULT_CCS_USAGE_SCRIPT,
-    onError
+    usageScript = DEFAULT_CCS_USAGE_SCRIPT
   } = options
 
-  const deeplink = buildCcSwitchImportDeeplink({
+  return buildCcSwitchImportDeeplink({
     baseUrl,
     platform,
     clientType,
@@ -61,7 +58,13 @@ export function executeCcsImport(options: ExecuteCcsImportOptions): void {
     apiKey,
     usageScript
   })
+}
 
+/**
+ * 打开 ccswitch:// 深链，触发本地 CC Switch 协议处理器
+ * - 100ms 后若页面仍聚焦，视为未安装 CC Switch 并触发 onError
+ */
+export function openCcSwitchDeeplink(deeplink: string, onError?: (message: string) => void): void {
   try {
     window.open(deeplink, '_self')
 
@@ -74,4 +77,13 @@ export function executeCcsImport(options: ExecuteCcsImportOptions): void {
   } catch {
     onError?.('未检测到 CC Switch，请先安装 CC Switch 客户端')
   }
+}
+
+/**
+ * 构建深链并直接唤起 CC Switch（Generator 与 Landing 共用底层能力）
+ */
+export function executeCcsImport(options: ExecuteCcsImportOptions): void {
+  const { onError, ...deeplinkOptions } = options
+  const deeplink = buildCcsImportDeeplink(deeplinkOptions)
+  openCcSwitchDeeplink(deeplink, onError)
 }
