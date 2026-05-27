@@ -240,7 +240,28 @@ const handleLandingImport = () => {
   <div v-else class="page">
     <header class="page-header">
       <h1>一键导入 CCS</h1>
-      <p>粘贴 Codex 或 Claude Code 配置，校验通过后生成分享链接。链接内含 API Key，请勿公开传播。</p>
+      <p class="page-header-intro">
+        粘贴 Codex 或 Claude Code 配置，选择下方任一方式完成导入。
+      </p>
+
+      <div class="usage-guide">
+        <div class="usage-item">
+          <h3>生成深度链接 — 分享给他人</h3>
+          <p>
+            适用：要把配置发给小伙伴，让对方在自己电脑上导入。<br />
+            用法：粘贴配置 → 点击「生成深度链接」→ 复制链接发送给对方 → 对方打开链接后点击「一键导入」。
+          </p>
+        </div>
+        <div class="usage-item">
+          <h3>一键导入 — 本机使用</h3>
+          <p>
+            适用：就在本机使用、已安装 CC Switch 的用户。<br />
+            用法：粘贴配置 → 点击「一键导入」→ 直接唤起 CC Switch 完成导入。
+          </p>
+        </div>
+      </div>
+
+      <p class="page-header-note">分享链接内含 API Key，请勿公开传播。</p>
     </header>
 
     <div class="layout">

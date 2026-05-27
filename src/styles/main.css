@@ -46,6 +46,42 @@ body {
   line-height: 1.6;
 }
 
+.page-header-intro {
+  margin-top: 0;
+}
+
+.usage-guide {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.usage-item {
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+}
+
+.usage-item h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.usage-item p {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.page-header-note {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
 .layout {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
@@ -339,6 +375,10 @@ body {
 
 @media (max-width: 900px) {
   .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .usage-guide {
     grid-template-columns: 1fr;
   }
 
