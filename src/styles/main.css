@@ -83,10 +83,7 @@ body {
 }
 
 .layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
-  gap: 24px;
-  align-items: start;
+  width: 100%;
 }
 
 .panel {
@@ -137,6 +134,37 @@ body {
 .tab-panel {
   display: flex;
   flex-direction: column;
+}
+
+/** 双平台均已填写时的提示条 */
+.platform-warning {
+  margin: -8px 0 20px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+}
+
+/** Tab 面板底部操作按钮组 */
+.tab-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+/** Codex 双文本域：降低默认高度，便于小屏看到下方操作按钮（需高于 .field textarea 优先级） */
+.tab-panel-codex .field textarea.textarea-codex {
+  min-height: 128px;
+}
+
+.tab-panel-codex .field {
+  margin-bottom: 14px;
 }
 
 .field-hint {
@@ -199,23 +227,18 @@ body {
   color: #dc2626;
 }
 
-.action-panel {
+.share-link-block {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  position: sticky;
-  top: 24px;
+  gap: 8px;
+  margin-top: 16px;
 }
 
-.action-panel h2 {
+.share-link-label {
   margin: 0;
-  font-size: 20px;
-}
-
-.action-panel p {
-  margin: 0;
-  color: #6b7280;
-  line-height: 1.6;
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
 }
 
 .import-btn {
@@ -294,7 +317,147 @@ body {
   align-items: center;
   justify-content: center;
   padding: 32px 20px;
-  gap: 16px;
+}
+
+/** Landing 主内容区：相对垂直居中略向上偏移 */
+.landing-main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  width: 100%;
+  margin-top: -10vh;
+}
+
+/** Landing 页：深链解析出的配置摘要卡片 */
+.landing-import-info {
+  width: 100%;
+  max-width: 480px;
+  padding: 20px;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+.landing-info-list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.landing-import-note {
+  margin: 16px 0 0;
+  font-size: 12px;
+  color: #9ca3af;
+  line-height: 1.5;
+}
+
+.landing-info-row {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.landing-info-row dt {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #6b7280;
+}
+
+.landing-info-row dd {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #1f2937;
+  word-break: break-all;
+}
+
+/** Base URL / API Key 行：文本与复制图标并排 */
+.landing-info-value {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.landing-info-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.landing-info-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+}
+
+/** 复制图标按钮 */
+.copy-icon-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  color: #6b7280;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.copy-icon-btn:hover {
+  color: #4f46e5;
+  border-color: #c7d2fe;
+  background: #f5f3ff;
+}
+
+/** 吐司提示（顶部居中） */
+.toast {
+  position: fixed;
+  left: 50%;
+  top: 24px;
+  z-index: 1000;
+  transform: translateX(-50%);
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.4;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.1);
+  pointer-events: none;
+}
+
+.toast-success {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.toast-error {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.toast-fade-enter-active,
+.toast-fade-leave-active {
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+
+.toast-fade-enter-from,
+.toast-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-8px);
 }
 
 .import-btn-large {
@@ -320,12 +483,6 @@ body {
   left: 0;
   right: 0;
   margin-top: 0;
-}
-
-.share-link-block {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
 
 .share-link-row {
@@ -373,17 +530,30 @@ body {
   color: #047857;
 }
 
+.tab-panel .alert {
+  margin-top: 16px;
+}
+
 @media (max-width: 900px) {
-  .layout {
-    grid-template-columns: 1fr;
+  .page {
+    padding: 20px 16px 40px;
+  }
+
+  .panel {
+    padding: 16px;
   }
 
   .usage-guide {
     grid-template-columns: 1fr;
   }
 
-  .action-panel {
-    position: static;
+  /** 小屏进一步压缩 Codex 文本域，确保操作按钮进入首屏 */
+  .tab-panel-codex .field textarea.textarea-codex {
+    min-height: 96px;
+  }
+
+  .textarea-large {
+    min-height: 200px;
   }
 
   .share-link-row {

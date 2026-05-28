@@ -7,7 +7,7 @@ import {
   type CodexConfigValidationError
 } from './utils/codexConfigParser'
 import { buildCcsImportDeeplink, openCcSwitchDeeplink } from './utils/executeCcsImport'
-import { buildShareUrl, getDeeplinkFromSearch, hasDeeplinkParam } from './utils/shareDeeplink'
+import { buildShareUrl, getDeeplinkFromSearch, hasDeeplinkParam, parseCcSwitchImportDeeplink, type ParsedCcSwitchDeeplink } from './utils/shareDeeplink'
 
 type ImportTab = 'codex' | 'claude'
 type PageMode = 'generator' | 'landing-valid' | 'landing-invalid'
@@ -49,20 +49,44 @@ const codexErrors = ref<CodexConfigValidationError[]>([])
 const claudeErrors = ref<ClaudeConfigValidationError[]>([])
 const globalMessage = ref('')
 const shareUrl = ref('')
-const copyHint = ref('')
+const shareUrlPlatform = ref<ImportTab | null>(null)
 const pageMode = ref<PageMode>('generator')
 const landingDeeplink = ref<string | null>(null)
+/** Landing 页：从深链解析出的导入配置摘要 */
+const landingImportInfo = ref<ParsedCcSwitchDeeplink | null>(null)
+/** 全局吐司提示 */
+type ToastType = 'success' | 'error'
+const toastMessage = ref('')
+const toastType = ref<ToastType>('success')
+let toastTimer: ReturnType<typeof setTimeout> | null = null
 
 const tabs: { id: ImportTab; label: string }[] = [
   { id: 'codex', label: 'Codex' },
   { id: 'claude', label: 'Claude Code' }
 ]
 
+/** 平台 ID 对应的界面展示名称 */
+const platformLabels: Record<ImportTab, string> = {
+  codex: 'Codex',
+  claude: 'Claude Code'
+}
+
 /** Codex 字段级校验错误 */
 const codexErrorsByField = computed(() => ({
   configToml: codexErrors.value.filter((item) => item.field === 'configToml'),
   authJson: codexErrors.value.filter((item) => item.field === 'authJson')
 }))
+
+/** 判断 Codex 侧是否已填写（任一字段非空即视为已填） */
+const isCodexFilled = computed(() =>
+  configToml.value.trim() !== '' || authJson.value.trim() !== ''
+)
+
+/** 判断 Claude 侧是否已填写 */
+const isClaudeFilled = computed(() => claudeSettingsJson.value.trim() !== '')
+
+/** 两侧均已填写时展示警告，提醒一次操作只处理一个平台 */
+const showMultiPlatformWarning = computed(() => isCodexFilled.value && isClaudeFilled.value)
 
 /**
  * 根据 URL 中的 deeplink 参数决定页面模式
@@ -76,6 +100,7 @@ onMounted(() => {
   const deeplink = getDeeplinkFromSearch()
   if (deeplink) {
     landingDeeplink.value = deeplink
+    landingImportInfo.value = parseCcSwitchImportDeeplink(deeplink)
     pageMode.value = 'landing-valid'
     return
   }
@@ -92,33 +117,61 @@ const switchTab = (tab: ImportTab) => {
   claudeErrors.value = []
   globalMessage.value = ''
   shareUrl.value = ''
-  copyHint.value = ''
+  shareUrlPlatform.value = null
 }
 
 /**
- * 写入剪贴板并展示复制反馈
+ * 展示顶部吐司提示
  */
-const copyShareUrl = async (url: string) => {
+const showToast = (message: string, type: ToastType = 'success') => {
+  toastMessage.value = message
+  toastType.value = type
+
+  if (toastTimer) {
+    clearTimeout(toastTimer)
+  }
+
+  toastTimer = setTimeout(() => {
+    toastMessage.value = ''
+    toastTimer = null
+  }, 2000)
+}
+
+/**
+ * 写入剪贴板，成功返回 true
+ */
+const copyToClipboard = async (text: string): Promise<boolean> => {
   try {
-    await navigator.clipboard.writeText(url)
-    copyHint.value = '已复制'
-    setTimeout(() => {
-      copyHint.value = ''
-    }, 2000)
+    await navigator.clipboard.writeText(text)
+    return true
   } catch {
-    copyHint.value = '复制失败，请手动复制'
+    return false
   }
 }
 
 /**
- * 校验配置并构建 ccswitch:// 深链
+ * 复制分享链接并展示吐司反馈
  */
-const buildDeeplinkFromForm = (): { ok: true; deeplink: string } | { ok: false } => {
-  if (activeTab.value === 'codex') {
+const copyShareUrl = async (url: string) => {
+  const copied = await copyToClipboard(url)
+  if (copied) {
+    showToast('复制成功', 'success')
+  } else {
+    showToast('复制失败，请手动复制', 'error')
+  }
+}
+
+/**
+ * 按指定平台校验配置并构建 ccswitch:// 深链
+ */
+const buildDeeplinkForPlatform = (
+  platform: ImportTab
+): { ok: true; deeplink: string } | { ok: false } => {
+  if (platform === 'codex') {
     const result = validateAndParseCodexConfig(configToml.value, authJson.value)
     if (!result.ok) {
       codexErrors.value = result.errors
-      globalMessage.value = '请先修正配置格式后再生成链接'
+      globalMessage.value = '请先修正配置格式后再操作'
       return { ok: false }
     }
 
@@ -136,7 +189,7 @@ const buildDeeplinkFromForm = (): { ok: true; deeplink: string } | { ok: false }
   const result = validateAndParseClaudeConfig(claudeSettingsJson.value)
   if (!result.ok) {
     claudeErrors.value = result.errors
-    globalMessage.value = '请先修正配置格式后再生成链接'
+    globalMessage.value = '请先修正配置格式后再操作'
     return { ok: false }
   }
 
@@ -152,34 +205,41 @@ const buildDeeplinkFromForm = (): { ok: true; deeplink: string } | { ok: false }
 }
 
 /**
- * 生成带 deeplink 参数的分享 URL，并默认写入剪贴板
+ * 生成指定平台的分享 URL，并默认写入剪贴板
  */
-const handleGenerateLink = async () => {
+const handleGenerateLink = async (platform: ImportTab) => {
   codexErrors.value = []
   claudeErrors.value = []
   globalMessage.value = ''
   shareUrl.value = ''
-  copyHint.value = ''
+  shareUrlPlatform.value = null
 
-  const built = buildDeeplinkFromForm()
+  const built = buildDeeplinkForPlatform(platform)
   if (!built.ok) {
     return
   }
 
   const url = buildShareUrl(built.deeplink)
   shareUrl.value = url
-  await copyShareUrl(url)
+  shareUrlPlatform.value = platform
+
+  const copied = await copyToClipboard(url)
+  if (copied) {
+    showToast('链接已复制', 'success')
+  } else {
+    showToast('复制失败，请手动复制', 'error')
+  }
 }
 
 /**
- * Generator 页：校验配置后直接唤起 CC Switch，无需生成分享链接
+ * 校验指定平台配置后直接唤起 CC Switch
  */
-const handleDirectImport = () => {
+const handleDirectImport = (platform: ImportTab) => {
   codexErrors.value = []
   claudeErrors.value = []
   globalMessage.value = ''
 
-  const built = buildDeeplinkFromForm()
+  const built = buildDeeplinkForPlatform(platform)
   if (!built.ok) {
     return
   }
@@ -187,6 +247,14 @@ const handleDirectImport = () => {
   openCcSwitchDeeplink(built.deeplink, (message) => {
     globalMessage.value = message
   })
+}
+
+/**
+ * Landing 页：复制字段内容并展示吐司提示
+ */
+const copyLandingField = async (text: string) => {
+  const copied = await copyToClipboard(text)
+  showToast(copied ? '复制成功' : '复制失败', copied ? 'success' : 'error')
 }
 
 /**
@@ -206,8 +274,57 @@ const handleLandingImport = () => {
 </script>
 
 <template>
-  <!-- Landing：有效 deeplink，仅展示居中导入按钮 -->
+  <!-- Landing：有效 deeplink，展示配置摘要与导入按钮 -->
   <div v-if="pageMode === 'landing-valid'" class="landing-page">
+    <div class="landing-main">
+      <div v-if="landingImportInfo" class="landing-import-info">
+      <dl class="landing-info-list">
+        <div class="landing-info-row">
+          <dt>平台</dt>
+          <dd>{{ landingImportInfo.platform }}</dd>
+        </div>
+        <div class="landing-info-row">
+          <dt>Base URL</dt>
+          <dd class="landing-info-value">
+            <span class="landing-info-mono landing-info-text">{{ landingImportInfo.baseUrl }}</span>
+            <button
+              type="button"
+              class="copy-icon-btn"
+              aria-label="复制 Base URL"
+              @click="copyLandingField(landingImportInfo.baseUrl)"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"
+                />
+              </svg>
+            </button>
+          </dd>
+        </div>
+        <div class="landing-info-row">
+          <dt>API Key</dt>
+          <dd class="landing-info-value">
+            <span class="landing-info-mono landing-info-text">{{ landingImportInfo.apiKey }}</span>
+            <button
+              type="button"
+              class="copy-icon-btn"
+              aria-label="复制 API Key"
+              @click="copyLandingField(landingImportInfo.apiKey)"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"
+                />
+              </svg>
+            </button>
+          </dd>
+        </div>
+      </dl>
+      <p class="landing-import-note">API Key 请勿公开传播</p>
+    </div>
+
     <button
       class="import-btn import-btn-large"
       type="button"
@@ -221,6 +338,7 @@ const handleLandingImport = () => {
       class="alert alert-error landing-alert"
     >
       {{ globalMessage }}
+    </div>
     </div>
 
     <footer class="page-footer landing-footer">
@@ -236,12 +354,12 @@ const handleLandingImport = () => {
     </footer>
   </div>
 
-  <!-- Generator：配置表单 + 生成分享链接 -->
+  <!-- Generator：配置表单 + 分享/导入结果 -->
   <div v-else class="page">
     <header class="page-header">
-      <h1>一键导入 CCS</h1>
+      <h1>一键导入 CC Switch</h1>
       <p class="page-header-intro">
-        粘贴 Codex 或 Claude Code 配置，选择下方任一方式完成导入。
+        粘贴 Codex 或 Claude Code 配置，在对应标签页内分别完成分享或导入。
       </p>
 
       <div class="usage-guide">
@@ -249,14 +367,14 @@ const handleLandingImport = () => {
           <h3>生成深度链接 — 分享给他人</h3>
           <p>
             适用：要把配置发给小伙伴，让对方在自己电脑上导入。<br />
-            用法：粘贴配置 → 点击「生成深度链接」→ 复制链接发送给对方 → 对方打开链接后点击「一键导入」。
+            用法：在对应标签页粘贴配置 → 点击「生成深度链接 (平台)」→ 复制链接发送给对方 → 对方打开链接后点击「一键导入」。
           </p>
         </div>
         <div class="usage-item">
           <h3>一键导入 — 本机使用</h3>
           <p>
             适用：就在本机使用、已安装 CC Switch 的用户。<br />
-            用法：粘贴配置 → 点击「一键导入」→ 直接唤起 CC Switch 完成导入。
+            用法：在对应标签页粘贴配置 → 点击「一键导入 (平台)」→ 直接唤起 CC Switch 完成导入。
           </p>
         </div>
       </div>
@@ -281,12 +399,21 @@ const handleLandingImport = () => {
           </button>
         </div>
 
-        <div v-if="activeTab === 'codex'" class="tab-panel">
+        <div
+          v-if="showMultiPlatformWarning"
+          class="platform-warning"
+          role="status"
+        >
+          检测到 Codex 与 Claude Code 均已填写配置，请分别在对应标签页内生成或导入，每次操作仅处理一个平台。
+        </div>
+
+        <div v-if="activeTab === 'codex'" class="tab-panel tab-panel-codex">
           <div class="field">
             <label for="config-toml">config.toml</label>
             <textarea
               id="config-toml"
               v-model="configToml"
+              class="textarea-codex"
               :class="{ 'is-error': codexErrorsByField.configToml.length > 0 }"
               :placeholder="CONFIG_TOML_PLACEHOLDER"
               spellcheck="false"
@@ -305,6 +432,7 @@ const handleLandingImport = () => {
             <textarea
               id="auth-json"
               v-model="authJson"
+              class="textarea-codex"
               :class="{ 'is-error': codexErrorsByField.authJson.length > 0 }"
               :placeholder="AUTH_JSON_PLACEHOLDER"
               spellcheck="false"
@@ -316,6 +444,52 @@ const handleLandingImport = () => {
             >
               {{ error.message }}
             </p>
+          </div>
+
+          <div class="tab-actions">
+            <button
+              class="import-btn"
+              type="button"
+              @click="handleGenerateLink('codex')"
+            >
+              生成深度链接 (Codex)
+            </button>
+            <button
+              class="import-btn import-btn-secondary"
+              type="button"
+              @click="handleDirectImport('codex')"
+            >
+              一键导入 (Codex)
+            </button>
+          </div>
+
+          <div
+            v-if="shareUrl && shareUrlPlatform === 'codex'"
+            class="share-link-block"
+          >
+            <p class="share-link-label">{{ platformLabels.codex }} 分享链接</p>
+            <div class="share-link-row">
+              <input
+                class="share-link-text"
+                type="text"
+                readonly
+                :value="shareUrl"
+              />
+              <button
+                class="copy-btn"
+                type="button"
+                @click="copyShareUrl(shareUrl)"
+              >
+                复制链接
+              </button>
+            </div>
+          </div>
+
+          <div
+            v-if="globalMessage"
+            class="alert alert-error"
+          >
+            {{ globalMessage }}
           </div>
         </div>
 
@@ -339,62 +513,69 @@ const handleLandingImport = () => {
               {{ error.message }}
             </p>
           </div>
-        </div>
-      </section>
 
-      <aside class="panel action-panel">
-        <h2>生成分享链接</h2>
-        <p>
-          当前标签：
-          <strong>{{ activeTab === 'codex' ? 'Codex' : 'Claude Code' }}</strong>
-        </p>
-
-        <button
-          class="import-btn"
-          type="button"
-          @click="handleGenerateLink"
-        >
-          生成深度链接
-        </button>
-
-        <button
-          class="import-btn import-btn-secondary"
-          type="button"
-          @click="handleDirectImport"
-        >
-          一键导入
-        </button>
-
-        <div v-if="shareUrl" class="share-link-block">
-          <div class="share-link-row">
-            <input
-              class="share-link-text"
-              type="text"
-              readonly
-              :value="shareUrl"
-            />
+          <div class="tab-actions">
             <button
-              class="copy-btn"
+              class="import-btn"
               type="button"
-              @click="copyShareUrl(shareUrl)"
+              @click="handleGenerateLink('claude')"
             >
-              复制链接
+              生成深度链接 (Claude Code)
+            </button>
+            <button
+              class="import-btn import-btn-secondary"
+              type="button"
+              @click="handleDirectImport('claude')"
+            >
+              一键导入 (Claude Code)
             </button>
           </div>
-          <p v-if="copyHint" class="copy-hint">{{ copyHint }}</p>
-        </div>
 
-        <div
-          v-if="globalMessage"
-          class="alert alert-error"
-        >
-          {{ globalMessage }}
+          <div
+            v-if="shareUrl && shareUrlPlatform === 'claude'"
+            class="share-link-block"
+          >
+            <p class="share-link-label">{{ platformLabels.claude }} 分享链接</p>
+            <div class="share-link-row">
+              <input
+                class="share-link-text"
+                type="text"
+                readonly
+                :value="shareUrl"
+              />
+              <button
+                class="copy-btn"
+                type="button"
+                @click="copyShareUrl(shareUrl)"
+              >
+                复制链接
+              </button>
+            </div>
+          </div>
+
+          <div
+            v-if="globalMessage"
+            class="alert alert-error"
+          >
+            {{ globalMessage }}
+          </div>
         </div>
-      </aside>
+      </section>
     </div>
 
     <footer class="page-footer">
       Powered by HAI
     </footer>
   </div>
+
+  <Transition name="toast-fade">
+    <div
+      v-if="toastMessage"
+      class="toast"
+      :class="toastType === 'success' ? 'toast-success' : 'toast-error'"
+      role="status"
+    >
+      {{ toastMessage }}
+    </div>
+  </Transition>
 </template>
